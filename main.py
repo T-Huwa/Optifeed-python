@@ -13,6 +13,10 @@ app = FastAPI()
 def on_startup():
     create_db_and_tables()
 
+@app.get("/")
+def read_root():
+    return {"welcome": "Welcome to OptiFeed!"}
+
 # 🔹 GET all categories
 @app.get("/categories/", response_model=list[Category])
 def get_categories(session: Session = Depends(get_session)):

@@ -27,13 +27,13 @@ def optimize_feed(session: Session, chicken_type: str, age: int, feed_amount: fl
 
     # Nutrient constraints (min & max)
     nutrient_constraints = {
-        "ME": (nutrient_req.ME, nutrient_req.ME * 1.2),
-        "CP": (nutrient_req.CP, nutrient_req.CP * 1.2),
-        "Ca": (nutrient_req.Ca, nutrient_req.Ca * 1.2),
-        "P": (nutrient_req.P, nutrient_req.P * 1.2),
-        "Mg": (nutrient_req.Mg, nutrient_req.Mg * 1.2),
-        "Na": (nutrient_req.Na, nutrient_req.Na * 1.2),
-        "K": (nutrient_req.K, nutrient_req.K * 1.2),
+        "ME": (nutrient_req.ME, nutrient_req.ME * 1.1),
+        "CP": (nutrient_req.CP, nutrient_req.CP * 1.1),
+        "Ca": (nutrient_req.Ca, nutrient_req.Ca * 1.1),
+        "P": (nutrient_req.P, nutrient_req.P * 1.1),
+        "Mg": (nutrient_req.Mg, nutrient_req.Mg * 1.1),
+        "Na": (nutrient_req.Na, nutrient_req.Na * 1.1),
+        "K": (nutrient_req.K, nutrient_req.K * 1.1),
     }
 
     # 2️⃣ Get Selected Ingredients & Nutrient Profiles
@@ -87,7 +87,7 @@ def optimize_feed(session: Session, chicken_type: str, age: int, feed_amount: fl
     )
 
     if not result.success:
-        return {"error": "Optimization failed. Adjust constraints or try again.", "constraints" : nutrient_constraints}
+        return {"error": "Optimization failed. Adjust constraints or try again.", "constraints" : nutrient_req}
 
     # 5️⃣ Compute Optimized Ingredient Quantities
     optimized_percentages = result.x
