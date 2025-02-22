@@ -17,16 +17,6 @@ def on_startup():
 def read_root():
     return {"welcome": "Welcome to OptiFeed!"}
 
-from fastapi import FastAPI, Depends, HTTPException
-from sqlmodel import Session, select
-from db import get_session
-from models import (
-    Category, Ingredient, NutritionalRequirement,
-    NutrientComposition, AdditiveRequirement, User
-)
-
-app = FastAPI()
-
 
 # 🔹 GET a single category by ID
 @app.get("/categories/{category_id}", response_model=Category)
@@ -73,15 +63,6 @@ def get_nutrient_composition(ingredient_id: int, session: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Nutrient composition not found for the given ingredient")
 
     return composition
-
-
-# 🔹 GET a single user by ID
-@app.get("/users/{user_id}", response_model=User)
-def get_user(user_id: int, session: Session = Depends(get_session)):
-    user = session.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
 
 
 # 🔹 GET all categories
