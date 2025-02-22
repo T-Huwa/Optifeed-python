@@ -17,6 +17,73 @@ def on_startup():
 def read_root():
     return {"welcome": "Welcome to OptiFeed!"}
 
+from fastapi import FastAPI, Depends, HTTPException
+from sqlmodel import Session, select
+from db import get_session
+from models import (
+    Category, Ingredient, NutritionalRequirement,
+    NutrientComposition, AdditiveRequirement, User
+)
+
+app = FastAPI()
+
+
+# 🔹 GET a single category by ID
+@app.get("/categories/{category_id}", response_model=Category)
+def get_category(category_id: int, session: Session = Depends(get_session)):
+    category = session.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    return category
+
+
+# 🔹 GET a single ingredient by ID
+@app.get("/ingredients/{ingredient_id}", response_model=Ingredient)
+def get_ingredient(ingredient_id: int, session: Session = Depends(get_session)):
+    ingredient = session.get(Ingredient, ingredient_id)
+    if not ingredient:
+        raise HTTPException(status_code=404, detail="Ingredient not found")
+    return ingredient
+
+
+# 🔹 GET a nutritional requirement by Age and Category
+@app.get("/nutritional-requirements/{category}/{age}", response_model=NutritionalRequirement)
+def get_nutritional_requirement(category: str, age: int, session: Session = Depends(get_session)):
+    requirement = session.exec(
+        select(NutritionalRequirement)
+        .where(NutritionalRequirement.category == category)
+        .where(NutritionalRequirement.age == age)
+    ).first()
+
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Nutritional requirement not found for the given category and age")
+
+    return requirement
+
+
+# 🔹 GET nutrient composition for a specific ingredient
+@app.get("/nutrient-compositions/{ingredient_id}", response_model=NutrientComposition)
+def get_nutrient_composition(ingredient_id: int, session: Session = Depends(get_session)):
+    composition = session.exec(
+        select(NutrientComposition)
+        .where(NutrientComposition.ingredient_id == ingredient_id)
+    ).first()
+
+    if not composition:
+        raise HTTPException(status_code=404, detail="Nutrient composition not found for the given ingredient")
+
+    return composition
+
+
+# 🔹 GET a single user by ID
+@app.get("/users/{user_id}", response_model=User)
+def get_user(user_id: int, session: Session = Depends(get_session)):
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
 # 🔹 GET all categories
 @app.get("/categories/", response_model=list[Category])
 def get_categories(session: Session = Depends(get_session)):
