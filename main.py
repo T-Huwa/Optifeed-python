@@ -5,7 +5,6 @@ from models import (
     Category, Ingredient, NutritionalRequirement,
     NutrientComposition, AdditiveRequirement
 )
-from optimizer_pulp import optimize_feed_logic
 
 app = FastAPI()
 
@@ -199,15 +198,6 @@ def create_additive_requirement(
 #     Optimize feed formulation using PuLP without user-selected ingredients.
 #     """
 #     return optimize_feed_with_pulp(session, chicken_type, age)
-
-from pydantic import BaseModel
-from typing import Dict
-import pulp
-
-@app.get("/optimize")
-def optimize_feed(chicken_type: str, age: int, session: Session = Depends(get_session)):
-    return optimize_feed_logic(chicken_type, age, session)
-
 
 from typing import Dict
 from fastapi import FastAPI, HTTPException, Query
