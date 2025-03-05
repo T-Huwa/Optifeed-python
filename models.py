@@ -2,6 +2,12 @@ from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, List
 from datetime import datetime
 
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(index=True, unique=True, nullable=False)
+    password: str = Field(nullable=False)
+    phone_number: Optional[str] = None
+    
 
 class Category(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
