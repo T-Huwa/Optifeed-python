@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 from fastapi import HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -10,97 +10,205 @@ class OptimizationResult(BaseModel):
     composition: Dict[str, float]
     total_cost: float
     nutrient_values: Dict[str, float]
+    cost_per_kg: float
 
-def optimize_feed(session: Session, category: str, age: int, ingredient_ids: List[int]) -> OptimizationResult:
-    # Fetch nutritional requirements from the database
+def optimize_feed(
+    session: Session, 
+    feed_type: str,  # 'layers' or 'broilers'
+    age: int, 
+    ingredient_ids: List[int],
+    amount: Optional[float] = None  # total amount of feed to mix in kg (optional)
+) -> OptimizationResult:
+    """
+    Optimizes feed composition using a Stigler Diet-like approach.
+    
+    This function finds the minimum-cost combination of ingredients that satisfies
+    all nutritional requirements for a specific type of animal at a specific age.
+    """
+    
+    # Fetch nutritional requirements based on feed type and age
     statement = select(NutritionalRequirement).where(
-        (NutritionalRequirement.category == category) & (NutritionalRequirement.age == age)
+        (NutritionalRequirement.category == feed_type) & (NutritionalRequirement.age == age)
     )
     requirement = session.exec(statement).first()
 
     if not requirement:
-        raise HTTPException(status_code=404, detail="No nutritional requirements found for the given parameters.")
+        raise HTTPException(status_code=404, detail=f"No nutritional requirements found for {feed_type} at {age} weeks.")
 
-    # Create requirements dictionary
-    requirements = {k: v for k, v in requirement.dict().items() if v is not None and k not in ['id', 'feed_type', 'category', 'age', 'created_at', 'updated_at']}
+    # Extract nutrient requirements (exclude additives and non-nutrient fields)
+    nutrient_requirements = {}
+    for nutrient in ['ME', 'CP', 'Ca', 'P', 'Mg', 'Na', 'K']:
+        if hasattr(requirement, nutrient) and getattr(requirement, nutrient) is not None:
+            nutrient_requirements[nutrient] = getattr(requirement, nutrient)
+    
+    # Create maximum requirements (1.1 times minimum values)
+    max_nutrient_requirements = {k: v * 1.1 for k, v in nutrient_requirements.items()}
 
-    # Fetch ingredient details from the database
-    ingredients = {}
-    nutrient_composition = {}
+    # Define fixed values for additives (as per LP guide.docx)
+    additive_requirements = {
+        "Premix": 0.25,  # 0.25%
+        "Toxicin": 0.10,  # 0.10%
+        "Lysine": 0.10,   # 0.10%
+        "Methionine": 0.10,  # 0.10%
+        "Threonine": 0.10,  # 0.10%
+        "Salt": 0.25,    # 0.25%
+        "Tyrosine": 0.10,  # 0.10%
+        "MCP": 0.50,     # 0.50%
+        "Lime": 2.50     # 2.50%
+    }
+
+    # Step 1: Gather all ingredients data
+    ingredients_data = []
+    
     for ingredient_id in ingredient_ids:
+        # Get basic ingredient info
         ingredient = session.get(Ingredient, ingredient_id)
         if not ingredient:
             raise HTTPException(status_code=404, detail=f"Ingredient with ID {ingredient_id} not found")
-        ingredients[ingredient.name] = ingredient.price
-
-        # Fetch nutrient composition for the ingredient
+        
+        # Get nutrient composition
         composition = session.exec(
             select(NutrientComposition).where(NutrientComposition.ingredient_id == ingredient_id)
         ).first()
+        
         if not composition:
             raise HTTPException(status_code=404, detail=f"Nutrient composition for ingredient ID {ingredient_id} not found")
+        
+        # Create ingredient data structure
+        ingredient_data = {
+            'id': ingredient_id,
+            'name': ingredient.name,
+            'category': ingredient.category,
+            'price': ingredient.price,
+            'nutrients': {}
+        }
+        
+        # Add nutrient values
+        for nutrient in nutrient_requirements.keys():
+            if hasattr(composition, nutrient):
+                ingredient_data['nutrients'][nutrient] = getattr(composition, nutrient)
+            else:
+                ingredient_data['nutrients'][nutrient] = 0
+                
+        ingredients_data.append(ingredient_data)
 
-        for nutrient, value in composition.dict().items():
-            if nutrient not in ['id', 'ingredient_id', 'created_at', 'updated_at']:
-                if nutrient not in nutrient_composition:
-                    nutrient_composition[nutrient] = {}
-                nutrient_composition[nutrient][ingredient.name] = value
-
-    # Create the model
+    # Step 2: Create the optimization model
     model = pulp.LpProblem("Feed_Optimization", pulp.LpMinimize)
-
-    # Create variables for each ingredient
-    x = pulp.LpVariable.dicts("ingr", ingredients.keys(), lowBound=0, upBound=1)
-
-    # Objective function: Minimize cost
-    model += pulp.lpSum([x[i] * cost for i, cost in ingredients.items()])
-
-    # Add nutrient constraints
-    for nutrient, min_value in requirements.items():
-        if nutrient in nutrient_composition:  # Ensure nutrient is supported
-            nutrient_sum = pulp.lpSum([x[i] * nutrient_composition[nutrient].get(i, 0) for i in ingredients.keys()])
-            model += nutrient_sum >= min_value
+    
+    # Step 3: Define variables - percentage of each ingredient in the mix
+    ingredient_vars = {}
+    
+    for ingredient in ingredients_data:
+        # Set appropriate bounds based on ingredient type
+        if ingredient['name'] == "Maize bran":
+            ingredient_vars[ingredient['name']] = pulp.LpVariable(
+                f"ingr_{ingredient['name'].replace(' ', '_')}", 
+                lowBound=0, 
+                #upBound=0.05  # Max 5%
+            )
+        elif ingredient['name'] == "Fish meal":
+            ingredient_vars[ingredient['name']] = pulp.LpVariable(
+                f"ingr_{ingredient['name'].replace(' ', '_')}", 
+                lowBound=0, 
+                #upBound=0.05  # Max 5%
+            )
+        elif ingredient['name'] in additive_requirements:
+            # Fixed percentage for additives
+            fixed_value = additive_requirements[ingredient['name']] / 100  # Convert to decimal
+            ingredient_vars[ingredient['name']] = pulp.LpVariable(
+                f"ingr_{ingredient['name'].replace(' ', '_')}", 
+                lowBound=fixed_value, 
+                #upBound=fixed_value
+            )
         else:
-            print(f"Skipping unsupported nutrient: {nutrient}")
-
-    # Constraint: sum of ingredients = 100%
-    model += pulp.lpSum([x[i] for i in ingredients.keys()]) == 1
-
-    # Solve the model
-    status = model.solve()
-
-    # Check if solution is optimal
-    # if pulp.LpStatus[status] != 'Optimal':
-    #     raise HTTPException(status_code=400, detail="Could not find optimal solution")
-
-    # Prepare results
+            # Regular ingredients can be 0-100%
+            ingredient_vars[ingredient['name']] = pulp.LpVariable(
+                f"ingr_{ingredient['name'].replace(' ', '_')}", 
+                lowBound=0, 
+                upBound=1
+            )
+    
+    # Step 4: Define the objective function - minimize cost
+    model += pulp.lpSum([
+        ingredient_vars[ingredient['name']] * ingredient['price'] 
+        for ingredient in ingredients_data
+    ]), "Total_Cost"
+    
+    # Step 5: Define constraints
+    
+    # Constraint: Sum of all ingredients must equal 100%
+    model += pulp.lpSum([ingredient_vars[ingredient['name']] for ingredient in ingredients_data]) == 1, "Total_Percentage"
+    
+    # Nutrient minimum constraints
+    for nutrient, min_value in nutrient_requirements.items():
+        model += pulp.lpSum([
+            ingredient_vars[ingredient['name']] * ingredient['nutrients'].get(nutrient, 0)
+            for ingredient in ingredients_data
+        ]) >= min_value, f"Min_{nutrient}"
+    
+    # Nutrient maximum constraints
+    # for nutrient, max_value in max_nutrient_requirements.items():
+    #     model += pulp.lpSum([
+    #         ingredient_vars[ingredient['name']] * ingredient['nutrients'].get(nutrient, 0)
+    #         for ingredient in ingredients_data
+    #     ]) <= max_value, f"Max_{nutrient}"
+    
+    # Step 6: Solve the model
+    solver = pulp.PULP_CBC_CMD(msg=False)
+    print("Solving model...")
+    print(model)
+    status = model.solve(solver)
+    
+    # Step 7: Check results and prepare output
+    if pulp.LpStatus[status] != 'Optimal':
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Could not find optimal solution. Status: {pulp.LpStatus[status]}"
+        )
+    
+    # Step 8: Gather the results
     composition = {}
     total_cost = 0
     
-    # Collect results directly from the solved variables
-    for ingredient in ingredients.keys():
-        value = x[ingredient].value()
-        if value is not None and value > 0.0001:
-            composition[ingredient.replace('_', ' ')] = round(value * 100, 2)
-            total_cost += value * ingredients[ingredient]
-
-    # Calculate actual nutrient values
+    for ingredient in ingredients_data:
+        value = ingredient_vars[ingredient['name']].value()
+        if value is not None and value > 0.0001:  # Filter out very small values
+            composition[ingredient['name']] = round(value * 100, 2)  # Convert to percentage
+            total_cost += value * ingredient['price']
+    
+    # Calculate nutrient values in the final mix
     nutrient_values = {}
-    for nutrient in requirements.keys():
-        if nutrient in nutrient_composition:  # Ensure nutrient is supported
-            value = sum(x[i].value() * nutrient_composition[nutrient].get(i, 0)
-                       for i in ingredients.keys()
-                       if x[i].value() is not None)
-            nutrient_values[nutrient] = round(value, 2)
-
-    # Verify solution
+    for nutrient in nutrient_requirements.keys():
+        value = sum(
+            ingredient_vars[ingredient['name']].value() * ingredient['nutrients'].get(nutrient, 0)
+            for ingredient in ingredients_data
+            if ingredient_vars[ingredient['name']].value() is not None
+        )
+        nutrient_values[nutrient] = round(value, 2)
+    
+    # Add additive values to nutrient values
+    for ingredient in ingredients_data:
+        if ingredient['name'] in additive_requirements:
+            nutrient_values[ingredient['name']] = additive_requirements[ingredient['name']]
+    
+    # Validate the solution
     total_percentage = sum(composition.values())
-    if not (99.9 <= total_percentage <= 100.1):  # Allow for small numerical errors
-        raise HTTPException(status_code=400, detail=f"Invalid solution: total percentage is {total_percentage}%")
-
+    if not (99.9 <= total_percentage <= 100.1):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid solution: total percentage is {total_percentage}%"
+        )
+    
+    # Calculate final cost based on amount if provided
+    cost_per_kg = round(total_cost, 2)
+    final_cost = cost_per_kg
+    if amount:
+        final_cost = round(cost_per_kg * amount, 2)
+    
     return OptimizationResult(
         status=pulp.LpStatus[status],
         composition=composition,
-        total_cost=round(total_cost, 2),
-        nutrient_values=nutrient_values
+        total_cost=final_cost,
+        nutrient_values=nutrient_values,
+        cost_per_kg=cost_per_kg
     )
