@@ -205,17 +205,15 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 import pulp
 from sqlmodel import Session, select
-from models import NutritionalRequirement  # Ensure this import is correct
-from db import engine  # Ensure you have a database engine setup
+from models import NutritionalRequirement
+from db import engine
 
-# Response model
 class OptimizationResult(BaseModel):
     status: str
     composition: Dict[str, float]
     total_cost: float
     nutrient_values: Dict[str, float]
 
-# Endpoint to optimize feed
 @app.get("/optimizer/", response_model=OptimizationResult)
 def optimize_feed(category: str = Query(..., description="Category of chicken (Layers or Broilers)"),
                   age: int = Query(..., description="Age of the chicken in weeks")):
