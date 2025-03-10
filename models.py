@@ -3,7 +3,7 @@ from typing import Optional, List
 from datetime import datetime
 
 class User(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: Optional[int] = Field(default=None, primary_key=True, nullable=False, index=True)
     email: str = Field(index=True, unique=True, nullable=False)
     password: str = Field(nullable=False)
     fname: str = Field(nullable=False)
