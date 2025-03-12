@@ -1,7 +1,7 @@
 from sqlmodel import SQLModel, Session, create_engine
 from contextlib import asynccontextmanager
 
-DATABASE_URL = "sqlite:///database.db"  # Change this to PostgreSQL/MySQL if needed
+DATABASE_URL = "sqlitecloud://cymjknn2nz.g6.sqlite.cloud:8860/chinook.sqlite?apikey=yqhGDTzHlA9HjVhC6FOPdPBZLPIRsbUQddfnnv2NNRY"
 
 engine = create_engine(DATABASE_URL, echo=True)
 
