@@ -51,7 +51,9 @@ def register_user(user: User, session: Session = Depends(get_session)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered",
         )
+    
     user.password = get_password_hash(user.password)
+
     session.add(user)
     session.commit()
     session.refresh(user)

@@ -1,26 +1,18 @@
+from fastapi import APIRouter, HTTPException, Query, Depends
 import scipy.optimize as opt
 import numpy as np
+from sqlmodel import Session, select
+from db import get_session
+from models import NutritionalRequirement
 
-# Ingredient names
+router = APIRouter()
+
 ingredient_names = [
     "Maize Bran", "White Maize", "Wheat Bran", "Rice Bran", "Millet", 
     "Sorghum", "Soya Full Fat", "Soy Cake", "Sunflower", 
     "Sunflower Cake", "Fish Meal", "BSF"
 ]
 
-# Nutrient minimums (g or MJ per kg of feed).
-nutrients = np.array([
-    0,    # DM (not constrained)
-    12.5, # ME (MJ)
-    20.0, # CP (%)
-    1.05, # Ca (%)
-    0.45, # P (%)
-    0.0,  # Mg (%)
-    0.18, # Na (%)
-    0     # K (%)
-])
-
-# Ingredient data: [Price, DM, ME, CP, Ca, P, Mg, Na, K]
 data = np.array([
     [300, 88.7, 8.8, 11.9, 0.47, 0.34, 0.22, 0.08, 0.73],
     [1200, 90, 14.8, 8, 0.04, 0.29, 0.13, 0.05, 0.36],
@@ -39,49 +31,88 @@ data = np.array([
 prices = data[:, 0]
 nutrient_matrix = data[:, 1:].T
 
-# Objective function: minimize cost.
 def objective(x):
     return np.dot(prices, x)
+@router.get("/optimize-feed")
+def optimize_feed(
+    category: str = Query(..., description="Category of chicken (Layers or Broilers)"),
+    age: int = Query(..., description="Age of the chicken in weeks"),
+    ingredient_ids: list[int] = Query(..., description="List of ingredient IDs to use in the optimization process"),
+    session: Session = Depends(get_session)
+):
+    nutrient_query = session.exec(
+        select(NutritionalRequirement).where(
+            NutritionalRequirement.category == category,
+            NutritionalRequirement.age == age,
+        )
+    ).first()
 
-# Constraints for nutrients.
-constraints = [
-    {"type": "eq", "fun": lambda x: np.sum(x) - 100},  # Total weight must be 100 kg
-]
+    if not nutrient_query:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Nutrient requirements not found for category '{category}' and age '{age}' weeks."
+        )
 
-for i in range(len(nutrients)):
-    constraints.append({
-        "type": "ineq",
-        "fun": lambda x, i=i: np.dot(nutrient_matrix[i], x) - nutrients[i]
-    })
+    nutrients = np.array([
+        nutrient_query.DM or 0,  # DM
+        nutrient_query.ME or 0,  # ME
+        nutrient_query.CP or 0,  # CP
+        nutrient_query.Ca or 0,  # Ca
+        nutrient_query.P or 0,   # P
+        nutrient_query.Mg or 0,  # Mg
+        nutrient_query.Na or 0,  # Na
+        nutrient_query.K or 0   # K
+    ])
 
-# Bounds: non-negative amounts.
-bounds = [(0, None) for _ in range(len(data))]
+    selected_ingredients = [data[i] for i in ingredient_ids if i < len(data)]
+    selected_ingredient_names = [ingredient_names[i] for i in ingredient_ids if i < len(ingredient_names)]
+    
+    if not selected_ingredients:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid ingredients found for the provided IDs."
+        )
+    
+    selected_data = np.array(selected_ingredients)
+    selected_prices = selected_data[:, 0]
+    selected_nutrient_matrix = selected_data[:, 1:].T 
 
-# Non-uniform initial guess (random values summing to 100)
-initial_guess = np.random.rand(len(data))
-initial_guess = initial_guess / np.sum(initial_guess) * 100
+    def objective(x):
+        return np.dot(selected_prices, x)
 
-# Run optimization.
-result = opt.minimize(objective, initial_guess, bounds=bounds, constraints=constraints, method="SLSQP")
+    constraints = [
+        {"type": "eq", "fun": lambda x: np.sum(x) - 100},
+    ]
 
-# Prepare result.
-if result.success:
-    print("\nFeed for 100kg Bag:")
-    for i, amount in enumerate(result.x):
-        if amount > 0:
-            print(f"{ingredient_names[i]}: {amount:.2f} kg (Cost: MWK{amount * prices[i]:.2f})")
-    print(f"\nOptimal total cost: MWK{result.fun:.2f}")
+    for i in range(len(nutrients)):
+        constraints.append({
+            "type": "ineq",
+            "fun": lambda x, i=i: np.dot(selected_nutrient_matrix[i], x) - nutrients[i]
+        })
 
-    # Calculate nutrient content in the final mix
-    final_nutrients = np.dot(nutrient_matrix, result.x)
-    print("\nNutrient Content in Final Mix:")
-    print(f"DM: {final_nutrients[0]:.2f}% (Min: {nutrients[0]:.2f}%)")
-    print(f"ME: {final_nutrients[1]:.2f} MJ/kg (Min: {nutrients[1]:.2f} MJ/kg)")
-    print(f"CP: {final_nutrients[2]:.2f}% (Min: {nutrients[2]:.2f}%)")
-    print(f"Ca: {final_nutrients[3]:.2f}% (Min: {nutrients[3]:.2f}%)")
-    print(f"P: {final_nutrients[4]:.2f}% (Min: {nutrients[4]:.2f}%)")
-    print(f"Mg: {final_nutrients[5]:.2f}% (Min: {nutrients[5]:.2f}%)")
-    print(f"Na: {final_nutrients[6]:.2f}% (Min: {nutrients[6]:.2f}%)")
-    print(f"K: {final_nutrients[7]:.2f}% (Min: {nutrients[7]:.2f}%)")
-else:
-    print("Optimization failed.")
+    bounds = [(0, None) for _ in range(len(selected_data))]
+
+    initial_guess = np.random.rand(len(selected_data))
+    initial_guess = initial_guess / np.sum(initial_guess) * 100
+
+    result = opt.minimize(objective, initial_guess, bounds=bounds, constraints=constraints, method="SLSQP")
+
+    if result.success:
+        feed_result = []
+        for i, amount in enumerate(result.x):
+            if amount > 0:
+                feed_result.append({
+                    "ingredient": selected_ingredient_names[i],
+                    "amount_kg": round(amount, 2),
+                    "cost_mwk": round(amount * selected_prices[i], 2)
+                })
+        total_cost = round(result.fun, 2)
+        final_nutrients = np.dot(selected_nutrient_matrix, result.x)
+
+        return {
+            "success": True,
+            "feed": feed_result,
+            "total_cost_mwk": total_cost,
+        }
+    else:
+        return {"success": False, "message": "Optimization failed."}

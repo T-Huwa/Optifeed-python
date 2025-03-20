@@ -173,28 +173,7 @@ def create_additive_requirement(
         return additive_requirement
         
 
-# from typing import Dict
-# from fastapi import FastAPI, HTTPException, Query
-# from pydantic import BaseModel
-# import pulp
-# from sqlmodel import Session, select
-# from models import NutritionalRequirement  # Ensure this import is correct
-# from db import engine  # Ensure you have a database engine setup
-
-
-# class OptimizationResult(BaseModel):
-#     status: str
-#     composition: Dict[str, float]
-#     total_cost: float
-#     nutrient_values: Dict[str, float]
-
-# @app.get("/optimizer/", response_model=OptimizationResult)
-# def optimize_feed_endpoint(category: str = Query(..., description="Category of chicken (Layers or Broilers)"),
-#                            age: int = Query(..., description="Age of the chicken in weeks"),
-#                            ingredient_ids: List[int] = Query(..., description="List of ingredient IDs to use in optimization"),
-#                            session: Session = Depends(get_session)):
-#     return optimize_feed(session, category, age, ingredient_ids)
-
+# Optimizer
 from typing import Dict
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
@@ -364,3 +343,5 @@ def optimize_feed(category: str = Query(..., description="Category of chicken (L
     )
 
 
+from optimization.or_optimizer import router as optimizer_router
+app.include_router(optimizer_router, tags=["optimizer"])

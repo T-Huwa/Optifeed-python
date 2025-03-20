@@ -11,6 +11,7 @@ MYSQL_DATABASE = os.getenv("MYSQL_DATABASE")
 MYSQL_PORT = os.getenv("MYSQL_PORT", 3306)
 
 DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
+#DATABASE_URL="sqlite:///database.db"
 
 print(f"Connecting to database: {DATABASE_URL}")
 
